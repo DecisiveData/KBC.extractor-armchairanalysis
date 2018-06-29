@@ -1,1 +1,0 @@
-# KBC.extractor-armchairanalysis
