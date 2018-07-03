@@ -5,8 +5,6 @@ import os
 import requests
 from requests.auth import HTTPBasicAuth
 
-#test comment
-
 #Keboola
 DEFAULT_FILE_DESTINATION = "/data/out/tables/"
 
