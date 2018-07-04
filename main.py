@@ -3,9 +3,11 @@ import datetime
 import json
 import os
 import requests
+import time
 from requests.auth import HTTPBasicAuth
 
 #Keboola
+DEFAULT_FILE_INPUT       = "/data/in/tables/"
 DEFAULT_FILE_DESTINATION = "/data/out/tables/"
 
 #Credentials
@@ -57,18 +59,22 @@ ept['player']           = '/player'     # Player Detail
 ept['tweets']           = '/tweets'     # Tweets by Player
 
 def get_endpoint_json(endpoint, authorization=AUTH, parameters=dict()):
-    try:
+    #It appears that you get to make 120 api calls. You must not call the API for 60 seconds in a row in order to get that limit reset.
+    r = requests.get(endpoint, params=parameters, auth=authorization)
+    limit = r.headers.get('X-RateLimit-Limit')
+    remaining = r.headers.get('X-RateLimit-Remaining')
+    retry_after = r.headers.get('Retry-After')
+    print('Requests: ' + remaining + '/' + limit)
+    if not (retry_after is None) or r.status_code == 429: #Too Many Requests
+        print('Pausing for ' + retry_after + ' seconds at UTC: ' + datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S") + '.')
+        time.sleep(int(retry_after) + 1)
         r = requests.get(endpoint, params=parameters, auth=authorization)
-    except Exception:
-        print('Request error')
+    if r.status_code != 200:
+        print('Unsuccessful: Status Code' + str(r.status_code) + r.reason + ' at ' + endpoint)
+        print(json.dumps(r.json()))
         return None
     else:
-        if r.status_code != 200:
-            print('Did not receive response code 200')
-            return None
-        else:
-            doc = r.json()
-            return doc
+        return r.json()
 
 def iterate_endpoint_json(endpoint, authorization=AUTH, start=cfg['start_default'], count=cfg['count_default'], parameters=dict()):
     parameters['start'] = str(start)
@@ -97,6 +103,10 @@ drive_list          = []
 play_list           = []
 player_list         = []
 player_active_list  = []
+
+###################
+#lists with dictionaries full of actual data
+game_data_list      = []
 
 ## season_list
 ## game_list
@@ -132,21 +142,31 @@ for doc in doc_list:
 ## players.csv
 ## players_active.csv
 
-def write_file(list, filename, endpoint, parameters=dict(), ts=cfg['now'], authorization=AUTH):
-    for item in list:
-      r = requests.get(endpoint, params=parameters, auth=authorization)
-
-      if r.status_code == 200:
-        doc = r.json()
-        with open(filename, 'wt') as out_file:
-      
-          writer = csv.DictWriter(out_file, fieldnames=['data','time','file'], lineterminator='\n', quoting=csv.QUOTE_ALL)
-          writer.writerow({ 'data': json.dumps(doc), 'time': ts, 'file': filename})
+def write_file(list, filename):
+    with open(filename, 'wt') as out_file:
+        writer = csv.DictWriter(out_file, fieldnames=['data','time','file'], lineterminator='\n', quoting=csv.QUOTE_ALL)
+        writer.writerow({ 'data': json.dumps(doc), 'time': ts, 'file': filename})
     return
 
+##################
+# list of dictionaries to build:
+## game_info_list
+## 
 
-write_file(season_list, 'games.csv', cfg['url'] + ept['schedule'])
-write_file(player_list, 'players.csv', cfg['url'] + ept['players'])
+for game in game_list:
+    doc = get_endpoint_json(cfg['url'] + ept['game'] + '/' + str(game))
+    if not (doc is None):
+        game_data_list.append(doc['data'])
+
+filename = 'game.csv'
+with open(filename, 'wt') as out_file:
+    writer = csv.DictWriter(out_file, fieldnames=['data','time','file'], lineterminator='\n', quoting=csv.QUOTE_ALL)
+    for game in game_data_list:
+        dict_to_write = { 'data': json.dumps(game), 'time': cfg['now'], 'file': filename}
+        writer.writerow(dict_to_write)
+
+#write_file(season_list, 'data/games.csv', cfg['url'] + ept['schedule'])
+#write_file(player_list, 'players.csv', cfg['url'] + ept['players'])
 #write_file(season_list, 'players_active.csv', cfg['url'] + ept['players'], payload)
 
 pass

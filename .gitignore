@@ -1,3 +1,5 @@
 /vendor
 /data
 /.vs
+/data
+*.csv
