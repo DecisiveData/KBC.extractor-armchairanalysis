@@ -42,13 +42,13 @@ ept['schedule']         = '/schedule'   # All Games
 ept['games']            = '/games'      # Games by Season
                                         # Games by Team
 ept['game']             = '/game'       # Game Detail
-ept['snaps']            = '/snaps'      # Snaps by Game
+ept['snaps']            = '/snaps/'      # Snaps by Game
 
 ## Drives & Plays
-ept['drives']           = '/drives'     # Drives by Game
+ept['drives']           = '/drives/'    # Drives by Game
                                         # Drives by Team
-ept['plays']            = '/plays'      # Plays by Game
-ept['play']             = '/play'       # Play Detail
+ept['plays']            = '/plays/'     # Plays by Game
+ept['play']             = '/play/'       # Play Detail
 
 ## Players
 ept['players']          = '/players'    # All Players
@@ -59,18 +59,19 @@ ept['player']           = '/player'     # Player Detail
 ept['tweets']           = '/tweets'     # Tweets by Player
 
 def get_endpoint_json(endpoint, authorization=AUTH, parameters=dict()):
-    #It appears that you get to make 120 api calls. You must not call the API for 60 seconds in a row in order to get that limit reset.
+    #It appears that you get to make 120 API calls. You must not call the API for 60 seconds in a row in order to get that limit reset.
     r = requests.get(endpoint, params=parameters, auth=authorization)
     limit = r.headers.get('X-RateLimit-Limit')
     remaining = r.headers.get('X-RateLimit-Remaining')
     retry_after = r.headers.get('Retry-After')
-    print('Requests: ' + remaining + '/' + limit)
+    if remaining is not None and limit is not None:
+        print('Requests: ' + remaining + '/' + limit + ' : ' + endpoint)
     if not (retry_after is None) or r.status_code == 429: #Too Many Requests
         print('Pausing for ' + retry_after + ' seconds at UTC: ' + datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S") + '.')
         time.sleep(int(retry_after) + 1)
         r = requests.get(endpoint, params=parameters, auth=authorization)
     if r.status_code != 200:
-        print('Unsuccessful: Status Code' + str(r.status_code) + r.reason + ' at ' + endpoint)
+        print('Unsuccessful: Status Code ' + str(r.status_code) + r.reason + ' at ' + endpoint)
         print(json.dumps(r.json()))
         return None
     else:
@@ -83,7 +84,7 @@ def iterate_endpoint_json(endpoint, authorization=AUTH, start=cfg['start_default
     doc_list = []
     while start > 0:
         doc = get_endpoint_json(endpoint, authorization, parameters)
-        doc_list.append(doc)
+        doc_list.extend(doc['data'])
         if len(doc['data']) < count:
             start = -1
         else:
@@ -91,82 +92,75 @@ def iterate_endpoint_json(endpoint, authorization=AUTH, start=cfg['start_default
             parameters['start'] = str(start)
     return doc_list
 
+def populate_season(game_list):
+    season_list = []
+    for game in game_list:
+        if game['seas'] not in season_list:
+            season_list.append(game['seas'])
+    return season_list
+
+def populate_drive(game_list):
+    drive_list = []
+    for game in game_list:
+        drive = get_endpoint_json(cfg['url'] + ept['drives'] + str(game['gid']))
+        if drive is not None:
+            drive_list.extend(drive['data'])
+    return drive_list
+
+def populate_play(game_list):
+    play_list = []
+    for game in game_list:
+        play = get_endpoint_json(cfg['url'] + ept['plays'] + str(game['gid']), parameters={'mode':'expanded'})
+        if play is not None:
+            play_list.extend(play['data'])
+    return play_list
+
+def populate_snap(game_list):
+    snap_list = []
+    for game in game_list:
+        snap = get_endpoint_json(cfg['url'] + ept['snaps'] + str(game['gid']))
+        if play is not None:
+            snap_list.extend(play['data'])
+    return snap_list
+
+def list_to_listdict(list, key):
+    for i in range(0,len(list)):
+        d = {}
+        d[key] = list[i]
+        list[i] = d
+    return list
+
 ###################
 # universe of data to get
-team_list           = ['ARI','ATL','BAL','BUF','CAR','CHI','CIN','CLE',
-                       'DAL','DEN','DET','GB','HOU','IND','JAC','KC',
-                       'LAC','LA','MIA','MIN','NE','NO','NYG','NYJ',
-                       'OAK','PHI','PIT','SF','SEA','TB','TEN','WAS'] #check for STL and SD, maybe oilers?
-season_list         = []
-game_list           = []
-drive_list          = []
-play_list           = []
-player_list         = []
-player_active_list  = []
-
-###################
-#lists with dictionaries full of actual data
-game_data_list      = []
-
-## season_list
-## game_list
-doc = get_endpoint_json(cfg['url'] + ept['schedule'])
-
-for game_dict in doc['data']:
-  if game_dict['seas'] not in season_list:
-    season_list.append(game_dict['seas'])
-  if game_dict['gid'] not in game_list:
-    game_list.append(game_dict['gid'])
-
-## player_list (iterative)
-doc_list = iterate_endpoint_json(cfg['url'] + ept['players'])
-
-for doc in doc_list:
-    for player in doc['data']:
-        if player['player'] not in player_list:
-            player_list.append(player['player'])
-
-## player_active_list (iterative)
-doc_list = iterate_endpoint_json(cfg['url'] + ept['players'], parameters= {'status': 'active'})
-
-for doc in doc_list:
-    for player in doc['data']:
-        if player['player'] not in player_active_list:
-            player_active_list.append(player['player'])
+team_list           = list_to_listdict( ['ARI','ATL','BAL','BUF','CAR','CHI','CIN','CLE',
+                                         'DAL','DEN','DET','GB','HOU','IND','JAC','KC',
+                                         'LAC','LA','MIA','MIN','NE','NO','NYG','NYJ',
+                                         'OAK','PHI','PIT','SF','SEA','TB','TEN','WAS']  #check for STL and SD, maybe oilers?
+                                       , 'team')
+game_list           = get_endpoint_json(cfg['url'] + ept['schedule'])['data']
+season_list         = list_to_listdict(populate_season(game_list),'season')
+drive_list          = populate_drive(game_list)
+play_list           = populate_play(game_list)
+snap_list           = populate_snap(game_list)
+player_list         = iterate_endpoint_json(cfg['url'] + ept['players'])
+player_active_list  = iterate_endpoint_json(cfg['url'] + ept['players'], parameters= {'status': 'active'})
 
 ##################
-# files to write:
-## teams.csv
-## seasons.csv
-## games.csv
-## players.csv
-## players_active.csv
-
+# write files
 def write_file(list, filename):
     with open(filename, 'wt') as out_file:
         writer = csv.DictWriter(out_file, fieldnames=['data','time','file'], lineterminator='\n', quoting=csv.QUOTE_ALL)
-        writer.writerow({ 'data': json.dumps(doc), 'time': ts, 'file': filename})
+        for item in list:
+            writer.writerow({ 'data': json.dumps(item), 'time': cfg['now'], 'file': filename})
     return
 
-##################
-# list of dictionaries to build:
-## game_info_list
-## 
+write_file(team_list, 'team.csv')
+write_file(game_list, 'game.csv')
+write_file(season_list, 'season.csv')
+write_file(drive_list, 'drive.csv')
+write_file(play_list, 'play.csv')
+write_file(snap_list, 'snap.csv')
+write_file(player_list, 'player.csv')
+write_file(player_active_list, 'player_active.csv')
 
-for game in game_list:
-    doc = get_endpoint_json(cfg['url'] + ept['game'] + '/' + str(game))
-    if not (doc is None):
-        game_data_list.append(doc['data'])
-
-filename = 'game.csv'
-with open(filename, 'wt') as out_file:
-    writer = csv.DictWriter(out_file, fieldnames=['data','time','file'], lineterminator='\n', quoting=csv.QUOTE_ALL)
-    for game in game_data_list:
-        dict_to_write = { 'data': json.dumps(game), 'time': cfg['now'], 'file': filename}
-        writer.writerow(dict_to_write)
-
-#write_file(season_list, 'data/games.csv', cfg['url'] + ept['schedule'])
-#write_file(player_list, 'players.csv', cfg['url'] + ept['players'])
-#write_file(season_list, 'players_active.csv', cfg['url'] + ept['players'], payload)
-
-pass
+print('Done')
